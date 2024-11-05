@@ -1,0 +1,109 @@
+// Written for the Arduino IDE environment
+
+#include "SD.h"
+#include "SPI.h"
+#include <TinyGPS++.h>
+#include <HardwareSerial.h>
+#include <WiFi.h>
+
+#define TIME_ZONE 10
+
+#define SD_CS GPIO_NUM_13
+#define SD_MOSI GPIO_NUM_35
+#define SD_SCLK GPIO_NUM_36
+#define SD_MISO GPIO_NUM_37
+
+#define GPS_TX_PIN 18
+#define GPS_RX_PIN 17
+
+HardwareSerial GPSmodule(1);
+TinyGPSPlus gps;
+
+void setup() {
+  Serial.begin(115200);
+  
+  20-second delay before starting the program
+  Serial.println("Waiting 20 seconds before starting the program...");
+  delay(20000);
+
+  // Initialize GPS
+  GPSmodule.begin(9600, SERIAL_8N1, GPS_TX_PIN, GPS_RX_PIN);
+  delay(10);
+
+  // Initialize SD Card
+  SPI.begin(SD_SCLK, SD_MISO, SD_MOSI, SD_CS);
+  SPI.setFrequency(80000000);
+  delay(3000);
+  
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SDCard mount Failed.");
+    return;
+  } else {
+    Serial.println("SDCard mounted.");
+  }
+
+  // Create/Open the CSV file for writing
+  File file = SD.open("/wifi_data_10metres.csv", FILE_WRITE);
+  if (file) {
+    file.println("SSID, Latitude, Longitude");
+    file.close();
+  } else {
+    Serial.println("Failed to open file for writing.");
+  }
+
+  // Initialize Wi-Fi in Station Mode to scan
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+  Serial.println("Wi-Fi initialization complete.");
+}
+
+void loop() {
+  // Scan for Wi-Fi networks
+  int n = WiFi.scanNetworks();
+  Serial.println("Scan complete.");
+  
+  if (n == 0) {
+    Serial.println("No Wi-Fi networks found.");
+  } else {
+    // Process GPS data
+    if (GPSmodule.available() > 0) {
+      while (GPSmodule.available() > 0) {
+        gps.encode(GPSmodule.read());
+      }
+    } else {
+      Serial.println("Check GPS Module Wiring.");
+    }
+    
+    // Retrieve GPS location
+    if (gps.location.isValid()) {
+      double latitude = gps.location.lat();
+      double longitude = gps.location.lng();
+      
+      // Save scanned networks with GPS location to SD card
+      for (int i = 0; i < n; i++) {
+        String ssid = WiFi.SSID(i);
+        saveToSD(ssid, latitude, longitude);
+      }
+    } else {
+      Serial.println("Invalid GPS location.");
+    }
+  }
+  delay(10000);  // Delay between scans
+}
+
+void saveToSD(String ssid, double latitude, double longitude) {
+  File file = SD.open("/wifi_data.csv", FILE_APPEND);
+  
+  if (file) {
+    file.print(ssid);
+    file.print(",");
+    file.print(latitude, 6);
+    file.print(",");
+    file.println(longitude, 6);
+    file.close();
+    Serial.println("Data saved to SD card.");
+  } else {
+    Serial.println("Failed to open file for appending.");
+  }
+}
